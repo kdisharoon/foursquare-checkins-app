@@ -3,8 +3,13 @@ import { DynamoDBDocumentClient, BatchWriteCommand } from '@aws-sdk/lib-dynamodb
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import fs from 'fs';
 
-dotenv.config();
+if (fs.existsSync('backfill.env')) {
+  dotenv.config({ path: 'backfill.env' });
+} else {
+  dotenv.config();
+}
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'FoursquareCheckins';
