@@ -10,12 +10,10 @@ const docClient = DynamoDBDocumentClient.from(ddbClient, {
 });
 
 export const handler = async (event) => {
-  // CORS headers
+  // Lambda Function URL already handles CORS headers if configured in AWS console.
+  // We only set Content-Type here to avoid duplicate headers error in browsers.
   const headers = {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   };
 
   if (event.requestContext?.http?.method === 'OPTIONS' || event.httpMethod === 'OPTIONS') {
