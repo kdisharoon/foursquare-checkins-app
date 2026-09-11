@@ -51,7 +51,7 @@ function formatCheckinItem(checkin) {
 }
 
 export const handler = async (event) => {
-  console.log('Starting Foursquare weekly sync...');
+  console.log('Starting Foursquare daily sync...');
   const token = await getFoursquareToken();
   if (!token) {
     throw new Error('Foursquare OAuth token not found in SSM');
