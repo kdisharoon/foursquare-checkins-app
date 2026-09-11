@@ -1,5 +1,6 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, ScanCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import zlib from 'zlib';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const TABLE_NAME = process.env.DYNAMODB_TABLE || 'FoursquareCheckins';
@@ -10,8 +11,6 @@ const docClient = DynamoDBDocumentClient.from(ddbClient, {
 });
 
 export const handler = async (event) => {
-  // Lambda Function URL already handles CORS headers if configured in AWS console.
-  // We only set Content-Type here to avoid duplicate headers error in browsers.
   const headers = {
     'Content-Type': 'application/json',
   };
@@ -23,7 +22,8 @@ export const handler = async (event) => {
   try {
     const queryParams = event.queryStringParameters || {};
     const {
-      all,         // if 'true', scan all items in database
+      id,          // fetch single checkin with full raw_data
+      all,         // if 'true', scan all items in database (parallel segment scan + gzip)
       q,           // free text search across venue name, shout, city, category
       venueId,     // search specifically by venueId (uses GSI1)
       category,    // filter by category
@@ -34,35 +34,79 @@ export const handler = async (event) => {
       nextToken,
     } = queryParams;
 
-    // Fast path: fetch entire database in lightweight format for map + stats
-    if (all === 'true') {
-      let allItems = [];
-      let lastEvaluatedKey = undefined;
-
-      do {
-        const scanParams = {
+    // Single item lookup with full raw_data (e.g. for modal details and photos)
+    if (id) {
+      const cleanId = id.replace(/^CHECKIN#/, '');
+      const result = await docClient.send(
+        new QueryCommand({
           TableName: TABLE_NAME,
-          ExclusiveStartKey: lastEvaluatedKey,
-          ProjectionExpression: 'id, PK, SK, venueName, venueId, city, country, category, categoryId, createdAt, lat, lng, hasPhotos, shout, raw_data',
+          KeyConditionExpression: 'PK = :pk',
+          ExpressionAttributeValues: {
+            ':pk': `CHECKIN#${cleanId}`,
+          },
+        })
+      );
+
+      const item = result.Items?.[0];
+      if (!item) {
+        return {
+          statusCode: 404,
+          headers,
+          body: JSON.stringify({ error: 'Check-in not found' }),
         };
-
-        const result = await docClient.send(new ScanCommand(scanParams));
-        if (result.Items) {
-          allItems.push(...result.Items);
-        }
-        lastEvaluatedKey = result.LastEvaluatedKey;
-      } while (lastEvaluatedKey);
-
-      // Sort newest first (reverse chronological order)
-      allItems.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+      }
 
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({
-          items: allItems,
-          total: allItems.length,
-        }),
+        body: JSON.stringify(item),
+      };
+    }
+
+    // Fast parallel scan: fetch all items with lightweight projection and gzip compression
+    if (all === 'true') {
+      const totalSegments = 4;
+      const scanSegment = async (segment) => {
+        let items = [];
+        let lastKey = undefined;
+        do {
+          const res = await docClient.send(
+            new ScanCommand({
+              TableName: TABLE_NAME,
+              TotalSegments: totalSegments,
+              Segment: segment,
+              ExclusiveStartKey: lastKey,
+              ProjectionExpression:
+                'id, PK, SK, venueName, venueId, city, country, category, categoryId, createdAt, lat, lng, hasPhotos, shout',
+            })
+          );
+          if (res.Items) items.push(...res.Items);
+          lastKey = res.LastEvaluatedKey;
+        } while (lastKey);
+        return items;
+      };
+
+      const results = await Promise.all([0, 1, 2, 3].map(scanSegment));
+      const allItems = results.flat();
+
+      // Sort newest first (reverse chronological order)
+      allItems.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+
+      const payload = JSON.stringify({
+        items: allItems,
+        total: allItems.length,
+      });
+
+      const gzipped = zlib.gzipSync(Buffer.from(payload, 'utf8'));
+
+      return {
+        statusCode: 200,
+        isBase64Encoded: true,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Encoding': 'gzip',
+        },
+        body: gzipped.toString('base64'),
       };
     }
 

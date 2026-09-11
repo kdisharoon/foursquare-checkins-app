@@ -1,13 +1,36 @@
-import React from 'react';
-import { X, MapPin, Calendar, Tag, ExternalLink, Image, Heart, Award } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, MapPin, Calendar, Tag, ExternalLink, Image, Heart, Award, Loader2 } from 'lucide-react';
 
 export default function CheckinModal({ item, onClose }) {
   if (!item) return null;
 
-  const raw = item.raw_data || {};
+  const [fullItem, setFullItem] = useState(item);
+  const [loadingDetails, setLoadingDetails] = useState(!item.raw_data && item.hasPhotos);
+
+  const apiEndpoint = import.meta.env.VITE_SEARCH_API_URL || 'https://gitlrtgnfojlzrnha5wxanjdse0etfcv.lambda-url.us-east-1.on.aws/';
+
+  useEffect(() => {
+    setFullItem(item);
+    if (!item.raw_data && item.id) {
+      setLoadingDetails(true);
+      fetch(`${apiEndpoint}?id=${item.id}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && !data.error) {
+            setFullItem(data);
+          }
+        })
+        .catch((err) => console.error('Failed to load checkin details:', err))
+        .finally(() => setLoadingDetails(false));
+    } else {
+      setLoadingDetails(false);
+    }
+  }, [item, apiEndpoint]);
+
+  const raw = fullItem.raw_data || {};
   const photos = raw.photos?.items || [];
-  const dateStr = item.createdAt
-    ? new Date(item.createdAt * 1000).toLocaleString(undefined, {
+  const dateStr = fullItem.createdAt
+    ? new Date(fullItem.createdAt * 1000).toLocaleString(undefined, {
         weekday: 'long',
         year: 'numeric',
         month: 'long',
@@ -27,7 +50,7 @@ export default function CheckinModal({ item, onClose }) {
         {/* Modal Header */}
         <div className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-slate-100 p-4 flex items-center justify-between z-10">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">{item.venueName}</h2>
+            <h2 className="text-xl font-bold text-slate-900">{fullItem.venueName}</h2>
             <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
               <Calendar className="w-3.5 h-3.5 text-slate-400" />
               <span>{dateStr}</span>
@@ -45,17 +68,17 @@ export default function CheckinModal({ item, onClose }) {
         <div className="p-6 space-y-6">
           {/* Metadata badges */}
           <div className="flex flex-wrap gap-2 text-xs">
-            {item.category && (
+            {fullItem.category && (
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-700 font-medium border border-rose-100">
                 <Tag className="w-3 h-3" />
-                {item.category}
+                {fullItem.category}
               </span>
             )}
 
-            {item.city && (
+            {fullItem.city && (
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 font-medium border border-blue-100">
                 <MapPin className="w-3 h-3" />
-                {item.city}{item.country ? `, ${item.country}` : ''}
+                {fullItem.city}{fullItem.country ? `, ${fullItem.country}` : ''}
               </span>
             )}
 
@@ -75,15 +98,20 @@ export default function CheckinModal({ item, onClose }) {
           </div>
 
           {/* Shout comment */}
-          {item.shout && (
+          {fullItem.shout && (
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Shout / Note</p>
-              <p className="text-slate-800 text-sm italic">"{item.shout}"</p>
+              <p className="text-slate-800 text-sm italic">"{fullItem.shout}"</p>
             </div>
           )}
 
           {/* Photos Grid */}
-          {photos.length > 0 && (
+          {loadingDetails ? (
+            <div className="py-6 flex flex-col items-center justify-center text-slate-400 gap-2">
+              <Loader2 className="w-6 h-6 animate-spin text-rose-500" />
+              <p className="text-xs">Loading photos & full check-in info...</p>
+            </div>
+          ) : photos.length > 0 ? (
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <Image className="w-4 h-4 text-slate-600" />
@@ -110,7 +138,7 @@ export default function CheckinModal({ item, onClose }) {
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Venue & Location Details */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs">
@@ -120,10 +148,10 @@ export default function CheckinModal({ item, onClose }) {
                 <span className="text-slate-400">Address:</span> {raw.venue?.location?.address || 'N/A'}
               </div>
               <div>
-                <span className="text-slate-400">Coordinates:</span> {item.lat}, {item.lng}
+                <span className="text-slate-400">Coordinates:</span> {fullItem.lat}, {fullItem.lng}
               </div>
               <div>
-                <span className="text-slate-400">Checkin ID:</span> {item.id}
+                <span className="text-slate-400">Checkin ID:</span> {fullItem.id}
               </div>
               {venueUrl && (
                 <div>
@@ -131,9 +159,10 @@ export default function CheckinModal({ item, onClose }) {
                     href={venueUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-rose-600 font-semibold hover:underline inline-flex items-center gap-1"
+                    className="text-rose-600 hover:text-rose-700 font-semibold inline-flex items-center gap-1"
                   >
-                    View on Foursquare <ExternalLink className="w-3 h-3" />
+                    <span>View on Foursquare</span>
+                    <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
               )}
