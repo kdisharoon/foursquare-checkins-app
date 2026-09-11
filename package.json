@@ -1,0 +1,17 @@
+{
+  "name": "foursquare-checkins-app",
+  "version": "1.0.0",
+  "description": "Foursquare Check-in App with DynamoDB, Lambda, and Google OAuth Web Frontend",
+  "main": "scripts/backfill.js",
+  "type": "module",
+  "scripts": {
+    "backfill": "node scripts/backfill.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/client-ssm": "^3.600.0",
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5"
+  }
+}
