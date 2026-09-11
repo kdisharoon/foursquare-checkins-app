@@ -101,20 +101,23 @@ async function batchWriteItems(items) {
 }
 
 async function runBackfill() {
-  console.log('=== Starting Foursquare Check-in Backfill ===');
+  console.log('=== Starting Full Foursquare Check-in Backfill ===');
   const token = await getFoursquareToken();
   if (!token) {
     throw new Error('Foursquare OAuth token is missing.');
   }
 
   const limit = 250;
-  let offset = 0;
+  let beforeTimestamp = undefined;
   let totalSaved = 0;
   let totalAvailable = null;
+  const seenIds = new Set();
 
   while (true) {
-    console.log(`Fetching check-ins with offset=${offset}, limit=${limit}...`);
-    const url = `https://api.foursquare.com/v2/users/self/checkins?oauth_token=${token}&v=20231201&limit=${limit}&offset=${offset}&sort=oldestfirst`;
+    let url = `https://api.foursquare.com/v2/users/self/checkins?oauth_token=${token}&v=20231201&limit=${limit}&sort=newestfirst`;
+    if (beforeTimestamp) {
+      url += `&beforeTimestamp=${beforeTimestamp}`;
+    }
 
     try {
       const res = await axios.get(url);
@@ -126,7 +129,7 @@ async function runBackfill() {
 
       if (totalAvailable === null) {
         totalAvailable = data.count || 0;
-        console.log(`Total check-ins reported by Foursquare: ${totalAvailable}`);
+        console.log(`Total check-ins reported by Foursquare: ${totalAvailable.toLocaleString()}`);
       }
 
       const items = data.items || [];
@@ -135,29 +138,38 @@ async function runBackfill() {
         break;
       }
 
-      const formatted = items.map(formatCheckinItem);
-      console.log(`  Writing ${formatted.length} items to DynamoDB table "${TABLE_NAME}"...`);
-      await batchWriteItems(formatted);
+      const newItems = items.filter((item) => !seenIds.has(item.id));
+      newItems.forEach((item) => seenIds.add(item.id));
 
-      totalSaved += formatted.length;
-      offset += items.length;
+      if (newItems.length > 0) {
+        const formatted = newItems.map(formatCheckinItem);
+        await batchWriteItems(formatted);
+        totalSaved += formatted.length;
+      }
 
-      console.log(`  Progress: ${totalSaved}/${totalAvailable} check-ins saved (${((totalSaved / totalAvailable) * 100).toFixed(1)}%).`);
+      const oldestInBatch = items[items.length - 1];
+      const oldestDate = new Date(oldestInBatch.createdAt * 1000).toISOString().split('T')[0];
+      const pct = totalAvailable > 0 ? ((totalSaved / totalAvailable) * 100).toFixed(1) : '100';
 
-      if (offset >= totalAvailable || items.length < limit) {
-        console.log('Backfill completed successfully!');
+      console.log(`  [Batch] Saved ${totalSaved.toLocaleString()}/${totalAvailable.toLocaleString()} (${pct}%) — Reached date: ${oldestDate}`);
+
+      // Update beforeTimestamp to oldest item in batch for the next page
+      beforeTimestamp = oldestInBatch.createdAt;
+
+      if (items.length < limit) {
+        console.log('Reached the earliest check-in in history!');
         break;
       }
 
-      // 300ms pause to respect API rate limits
-      await new Promise((r) => setTimeout(r, 300));
+      // 80ms pause to respect API rate limits
+      await new Promise((r) => setTimeout(r, 80));
     } catch (err) {
-      console.error(`Error during fetch/write at offset ${offset}:`, err.response?.data || err.message);
+      console.error(`Error during fetch at beforeTimestamp ${beforeTimestamp}:`, err.response?.data || err.message);
       throw err;
     }
   }
 
-  console.log(`=== Backfill Complete: ${totalSaved} total check-ins written to DynamoDB! ===`);
+  console.log(`\n=== Backfill Complete: ${totalSaved.toLocaleString()} total check-ins written to DynamoDB! ===`);
 }
 
 runBackfill().catch((err) => {

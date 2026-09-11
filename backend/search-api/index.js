@@ -23,17 +23,50 @@ export const handler = async (event) => {
   try {
     const queryParams = event.queryStringParameters || {};
     const {
+      all,         // if 'true', scan all items in database
       q,           // free text search across venue name, shout, city, category
       venueId,     // search specifically by venueId (uses GSI1)
       category,    // filter by category
       city,        // filter by city
       startDate,   // filter by unix timestamp
       endDate,     // filter by unix timestamp
-      limit = '50',
+      limit = '250',
       nextToken,
     } = queryParams;
 
-    const limitNum = Math.min(parseInt(limit, 10) || 50, 250);
+    // Fast path: fetch entire database in lightweight format for map + stats
+    if (all === 'true') {
+      let allItems = [];
+      let lastEvaluatedKey = undefined;
+
+      do {
+        const scanParams = {
+          TableName: TABLE_NAME,
+          ExclusiveStartKey: lastEvaluatedKey,
+          ProjectionExpression: 'id, PK, SK, venueName, venueId, city, country, category, categoryId, createdAt, lat, lng, hasPhotos, shout, raw_data',
+        };
+
+        const result = await docClient.send(new ScanCommand(scanParams));
+        if (result.Items) {
+          allItems.push(...result.Items);
+        }
+        lastEvaluatedKey = result.LastEvaluatedKey;
+      } while (lastEvaluatedKey);
+
+      // Sort newest first (reverse chronological order)
+      allItems.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          items: allItems,
+          total: allItems.length,
+        }),
+      };
+    }
+
+    const limitNum = Math.min(parseInt(limit, 10) || 50, 1000);
 
     // If querying by specific venueId, use fast GSI1 query
     if (venueId) {
@@ -53,15 +86,16 @@ export const handler = async (event) => {
       }
 
       const result = await docClient.send(new QueryCommand(queryParams));
+      const sorted = (result.Items || []).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
-          items: result.Items || [],
+          items: sorted,
           nextToken: result.LastEvaluatedKey
             ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
             : null,
-          count: (result.Items || []).length,
+          count: sorted.length,
         }),
       };
     }
@@ -122,16 +156,17 @@ export const handler = async (event) => {
     }
 
     const result = await docClient.send(new ScanCommand(scanParams));
+    const sorted = (result.Items || []).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        items: result.Items || [],
+        items: sorted,
         nextToken: result.LastEvaluatedKey
           ? Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64')
           : null,
-        count: (result.Items || []).length,
+        count: sorted.length,
       }),
     };
   } catch (err) {
