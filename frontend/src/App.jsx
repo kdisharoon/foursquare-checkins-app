@@ -19,23 +19,23 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedCheckin, setSelectedCheckin] = useState(null);
 
-  const apiEndpoint = import.meta.env.VITE_SEARCH_API_URL;
+  const apiEndpoint = import.meta.env.VITE_SEARCH_API_URL || 'https://gitlrtgnfojlzrnha5wxanjdse0etfcv.lambda-url.us-east-1.on.aws/';
 
   const fetchCheckins = async () => {
     setLoading(true);
     setError(null);
     try {
-      if (apiEndpoint) {
-        const res = await fetch(`${apiEndpoint}?limit=250`);
-        const data = await res.json();
-        setCheckins(data.items || []);
-      } else {
-        // Fallback sample data if API is not yet attached
-        setCheckins([]);
+      console.log('Fetching check-ins from API:', apiEndpoint);
+      const res = await fetch(`${apiEndpoint}?limit=250`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
+      const data = await res.json();
+      console.log('Fetched check-ins response:', data);
+      setCheckins(data.items || []);
     } catch (err) {
       console.error('Fetch error:', err);
-      setError('Unable to load check-ins from search API.');
+      setError(err.message || 'Unable to load check-ins from search API.');
     } finally {
       setLoading(false);
     }

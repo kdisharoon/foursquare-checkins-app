@@ -29,7 +29,7 @@ export default function LoginGate({ children }) {
   useEffect(() => {
     if (user) return;
 
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '43814921133-lf12s0r1stjbqt4m8m9p031l9bcc7vgb.apps.googleusercontent.com';
 
     const initializeGsi = () => {
       if (window.google?.accounts?.id && clientId) {
