@@ -57,12 +57,18 @@ export const handler = async (event) => {
     throw new Error('Foursquare OAuth token not found in SSM');
   }
 
-  // Fetch the latest 100 check-ins (newest first)
-  const url = `https://api.foursquare.com/v2/users/self/checkins?oauth_token=${token}&v=20231201&limit=100&sort=newestfirst`;
+  // Calculate timestamp for 48 hours ago
+  const nowInSeconds = Math.floor(Date.now() / 1000);
+  const afterTimestamp = nowInSeconds - (48 * 60 * 60);
+  const fortyEightHoursDate = new Date(afterTimestamp * 1000).toISOString();
+  console.log(`Fetching check-ins created after ${fortyEightHoursDate} (last 48 hours)...`);
+
+  // Fetch check-ins from the last 48 hours (newest first)
+  const url = `https://api.foursquare.com/v2/users/self/checkins?oauth_token=${token}&v=20231201&afterTimestamp=${afterTimestamp}&limit=250&sort=newestfirst`;
   const res = await axios.get(url);
   const checkins = res.data?.response?.checkins?.items || [];
 
-  console.log(`Fetched ${checkins.length} recent check-ins from Foursquare.`);
+  console.log(`Fetched ${checkins.length} check-ins from the last 48 hours.`);
   let newCount = 0;
 
   for (const checkin of checkins) {
@@ -79,6 +85,9 @@ export const handler = async (event) => {
   console.log(`Successfully synced ${newCount} check-ins into ${TABLE_NAME}.`);
   return {
     statusCode: 200,
-    body: JSON.stringify({ message: `Synced ${newCount} check-ins`, count: newCount }),
+    body: JSON.stringify({
+      message: `Synced ${newCount} check-ins from the last 48 hours`,
+      count: newCount,
+    }),
   };
 };
